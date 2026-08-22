@@ -7,6 +7,33 @@ use tauri::{
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcuts(["ctrl+shift+v"])
+                .unwrap()
+                .with_handler(|app, shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        if shortcut.matches(
+                            tauri_plugin_global_shortcut::Modifiers::CONTROL
+                                | tauri_plugin_global_shortcut::Modifiers::SHIFT,
+                            tauri_plugin_global_shortcut::Code::KeyV,
+                        ) {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let is_visible = window.is_visible().unwrap_or(false);
+                                if is_visible {
+                                    let _ = window.hide();
+                                } else {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                    }
+                })
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

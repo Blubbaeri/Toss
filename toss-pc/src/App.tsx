@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './lib/supabase';
+import { enable, isEnabled, disable } from '@tauri-apps/plugin-autostart';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import './App.css';
 
 // Batas maksimal ukuran file yang boleh diupload
@@ -26,6 +28,7 @@ function App() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // Menu klik-kanan untuk hapus pesan: null = tertutup
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; note: TossNote } | null>(null);
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false);
 
   const listAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +41,24 @@ function App() {
   useEffect(() => {
     const closeMenu = () => setContextMenu(null);
     window.addEventListener('click', closeMenu);
+
+    // Inisialisasi Tauri plugins (aman untuk gagal jika di browser biasa)
+    const initTauriPlugins = async () => {
+      try {
+        const autostart = await isEnabled();
+        setAutoStartEnabled(autostart);
+        
+        let permissionGranted = await isPermissionGranted();
+        if (!permissionGranted) {
+          const permission = await requestPermission();
+          permissionGranted = permission === 'granted';
+        }
+      } catch (err) {
+        console.warn('Tauri plugins not available', err);
+      }
+    };
+    initTauriPlugins();
+
     return () => window.removeEventListener('click', closeMenu);
   }, []);
 
@@ -49,11 +70,30 @@ function App() {
       .channel('toss_notes_channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'toss_notes' }, (payload) => {
         const newNote = payload.new as TossNote;
+        let isNewFromOtherDevice = false;
+
         setNotes((prev) => {
           // Kalau id ini sudah ada (hasil insert kita sendiri), jangan dobel
           if (prev.some((n) => n.id === newNote.id)) return prev;
+          isNewFromOtherDevice = true;
           return [...prev, { ...newNote, status: 'sent' }];
         });
+
+        // Trigger notifikasi native
+        setTimeout(() => {
+          if (isNewFromOtherDevice && !document.hasFocus()) {
+            try {
+              isPermissionGranted().then(granted => {
+                if (granted) {
+                  sendNotification({
+                    title: 'Pesan Toss Baru',
+                    body: newNote.type === 'text' ? newNote.content : 'File baru diterima',
+                  });
+                }
+              });
+            } catch(e) {}
+          }
+        }, 100);
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'toss_notes' }, (payload) => {
         const oldNote = payload.old as TossNote;
@@ -83,6 +123,20 @@ function App() {
       console.error('Error fetching notes:', error);
     } else if (data) {
       setNotes(data.map((n) => ({ ...n, status: 'sent' as NoteStatus })));
+    }
+  };
+
+  const toggleAutoStart = async () => {
+    try {
+      if (autoStartEnabled) {
+        await disable();
+        setAutoStartEnabled(false);
+      } else {
+        await enable();
+        setAutoStartEnabled(true);
+      }
+    } catch (err) {
+      console.error('Failed to toggle autostart', err);
     }
   };
 
@@ -290,8 +344,19 @@ function App() {
   return (
     <div className="toss-app-container">
       {/* HEADER */}
-      <header className="toss-header">
-        <h1>Toss</h1>
+      <header className="toss-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ margin: 0 }}>Toss</h1>
+        <button 
+          onClick={toggleAutoStart}
+          style={{ 
+            fontSize: '12px', padding: '6px 10px', borderRadius: '6px', 
+            cursor: 'pointer', background: autoStartEnabled ? '#10b981' : '#4b5563', 
+            color: 'white', border: 'none', fontWeight: 'bold' 
+          }}
+          title={autoStartEnabled ? 'Auto-start saat Windows menyala (Aktif)' : 'Auto-start saat Windows menyala (Mati)'}
+        >
+          {autoStartEnabled ? '🚀 Auto-Start: ON' : '⚙️ Auto-Start: OFF'}
+        </button>
       </header>
 
       {/* LIST AREA */}
