@@ -19,13 +19,19 @@
         "backgroundColor": "#0f172a",
         "foregroundImage": "./assets/icon.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.blubbaeri.tossmobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "15e30da7-2197-4d6f-999f-e7da4a6da1d2"
+      }
+    }
   }
 }
