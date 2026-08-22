@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import { enable, isEnabled, disable } from '@tauri-apps/plugin-autostart';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
-import { Power, Trash2, Copy, CheckCheck, Paperclip, Inbox, DownloadCloud } from 'lucide-react';
+import { Power, Trash2, Copy, CheckCheck, Paperclip, Inbox, DownloadCloud, Search, ArrowUp, ArrowDown } from 'lucide-react';
 import './App.css';
 
 // Batas maksimal ukuran file yang boleh diupload
@@ -27,9 +27,13 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  // Menu klik-kanan untuk hapus pesan: null = tertutup
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; note: TossNote } | null>(null);
   const [autoStartEnabled, setAutoStartEnabled] = useState(false);
+
+  // Fitur Filter, Sort, Search, dan Delete Modal
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [filterDate, setFilterDate] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState<TossNote | null>(null);
 
   const listAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,10 +42,8 @@ function App() {
   // mengunggah ulang file yang sama tanpa user pilih file lagi
   const pendingFilesRef = useRef<Map<string, File>>(new Map());
 
-  // Tutup context menu begitu user klik di mana pun di layar
+  // Tutup konteks/modal jika butuh global listener
   useEffect(() => {
-    const closeMenu = () => setContextMenu(null);
-    window.addEventListener('click', closeMenu);
 
     // Inisialisasi Tauri plugins (aman untuk gagal jika di browser biasa)
     const initTauriPlugins = async () => {
@@ -59,8 +61,6 @@ function App() {
       }
     };
     initTauriPlugins();
-
-    return () => window.removeEventListener('click', closeMenu);
   }, []);
 
   // Fetch data awal (sekali saja) + subscribe granular ke INSERT/DELETE
@@ -284,11 +284,6 @@ function App() {
   };
 
   // ============ DELETE ============
-  const handleContextMenu = (e: React.MouseEvent, note: TossNote) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, note });
-  };
-
   const handleDeleteNote = async (note: TossNote) => {
     if (note.localId) {
       pendingFilesRef.current.delete(note.localId);
@@ -361,6 +356,33 @@ function App() {
         </button>
       </header>
 
+      {/* TOOLBAR: Search, Filter, Sort */}
+      <div className="toss-toolbar" style={{ display: 'flex', gap: '8px', padding: '10px 24px', background: 'var(--header-bg)', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ position: 'relative', flex: 1 }}>
+          <Search size={14} style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8' }} />
+          <input 
+            type="text" 
+            placeholder="Cari pesan..." 
+            value={searchTerm} 
+            onChange={e => setSearchTerm(e.target.value)}
+            style={{ width: '100%', padding: '8px 10px 8px 30px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'white', fontSize: '13px' }}
+          />
+        </div>
+        <input 
+          type="date" 
+          value={filterDate}
+          onChange={e => setFilterDate(e.target.value)}
+          style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'white', fontSize: '13px', colorScheme: 'dark' }}
+        />
+        <button 
+          onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+          style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'white', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+          title="Urutkan pesan"
+        >
+          {sortOrder === 'asc' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}
+        </button>
+      </div>
+
       {/* LIST AREA */}
       <main className="toss-list-area" ref={listAreaRef}>
         {notes.length === 0 ? (
@@ -370,11 +392,22 @@ function App() {
             <p className="empty-state-sub">Coba lempar teks atau file dari device lain.</p>
           </div>
         ) : (
-          notes.map((note) => (
+          notes
+            .filter((note) => {
+              const matchSearch = note.content.toLowerCase().includes(searchTerm.toLowerCase());
+              // Format ISO string YYYY-MM-DD
+              const matchDate = filterDate ? note.created_at.startsWith(filterDate) : true;
+              return matchSearch && matchDate;
+            })
+            .sort((a, b) => {
+              const timeA = new Date(a.created_at).getTime();
+              const timeB = new Date(b.created_at).getTime();
+              return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+            })
+            .map((note) => (
             <div
               key={note.localId || note.id}
               className={`toss-card ${note.status === 'error' ? 'toss-card-error' : ''}`}
-              onContextMenu={(e) => handleContextMenu(e, note)}
             >
               {/* RENDER CONTENT BERDASARKAN STATUS & TIPE */}
               {note.status === 'sending' && note.type === 'file' ? (
@@ -408,17 +441,29 @@ function App() {
                     <span className="toss-card-time">
                       {note.status === 'sending' ? 'Mengirim...' : formatTime(note.created_at)}
                     </span>
-                    {note.status !== 'sending' && note.type === 'text' && (
-                      <button
-                        className={`btn-copy ${copiedId === note.id ? 'copied' : ''}`}
-                        onClick={() => handleCopy(note.id, note.content)}
-                        title="Copy to clipboard"
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-                      >
-                        {copiedId === note.id ? <CheckCheck size={14} /> : <Copy size={14} />}
-                        {copiedId === note.id ? 'Copied' : 'Copy'}
-                      </button>
-                    )}
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      {note.status !== 'sending' && (
+                        <button
+                          className="btn-copy"
+                          style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}
+                          onClick={() => setShowDeleteModal(note)}
+                          title="Hapus pesan"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                      {note.status !== 'sending' && note.type === 'text' && (
+                        <button
+                          className={`btn-copy ${copiedId === note.id ? 'copied' : ''}`}
+                          onClick={() => handleCopy(note.id, note.content)}
+                          title="Copy to clipboard"
+                          style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          {copiedId === note.id ? <CheckCheck size={14} /> : <Copy size={14} />}
+                          {copiedId === note.id ? 'Copied' : 'Copy'}
+                        </button>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
@@ -459,23 +504,26 @@ function App() {
         </button>
       </footer>
 
-      {/* CONTEXT MENU (klik kanan untuk hapus) */}
-      {contextMenu && (
-        <div
-          className="context-menu"
-          style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            className="context-menu-item context-menu-delete"
-            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-            onClick={() => {
-              handleDeleteNote(contextMenu.note);
-              setContextMenu(null);
-            }}
-          >
-            <Trash2 size={14} /> Hapus Pesan
-          </button>
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteModal && (
+        <div className="modal-overlay" onClick={() => setShowDeleteModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, color: '#f1f5f9' }}>Hapus Pesan?</h3>
+            <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '20px' }}>
+              Pesan ini akan terhapus dari semua perangkat Anda. Tindakan ini tidak bisa dibatalkan.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button className="btn-modal-cancel" onClick={() => setShowDeleteModal(null)}>
+                Batal
+              </button>
+              <button className="btn-modal-delete" onClick={() => {
+                handleDeleteNote(showDeleteModal);
+                setShowDeleteModal(null);
+              }}>
+                Hapus
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
