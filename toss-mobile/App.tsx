@@ -16,10 +16,12 @@ import {
   Alert,
   Pressable,
   Modal,
+  ScrollView,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { Feather } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from './src/lib/supabase';
 
 // Batas maksimal ukuran file yang boleh diupload
@@ -31,6 +33,7 @@ interface TossNote {
   id: string;
   type: 'text' | 'file';
   content: string;
+  caption?: string;
   created_at: string;
   // Field lokal saja (tidak ada di DB), dipakai untuk optimistic UI
   status?: NoteStatus;
@@ -46,8 +49,12 @@ export default function App() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [filterDate, setFilterDate] = useState('');
+  const [filterType, setFilterType] = useState('all');
+  const [customDate, setCustomDate] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [tempDate, setTempDate] = useState(new Date());
   const [showDeleteModal, setShowDeleteModal] = useState<TossNote | null>(null);
+  const [pendingAsset, setPendingAsset] = useState<{asset: ImagePicker.ImagePickerAsset, localId: string} | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   // Simpan asset foto asli per localId, supaya tombol Retry bisa upload ulang
@@ -78,9 +85,14 @@ export default function App() {
   }, []);
 
   const fetchInitialNotes = async () => {
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    const oneMonthAgoIso = oneMonthAgo.toISOString();
+
     const { data, error } = await supabase
       .from('toss_notes')
       .select('*')
+      .gte('created_at', oneMonthAgoIso)
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -88,30 +100,60 @@ export default function App() {
     } else if (data) {
       setNotes(data.map((n) => ({ ...n, status: 'sent' as NoteStatus })));
     }
+
+    cleanupOldData();
+  };
+
+  const cleanupOldData = async () => {
+    try {
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+      await supabase.from('toss_notes').delete().lt('created_at', threeMonthsAgo.toISOString());
+    } catch (err) {
+      console.error('Failed to cleanup old data', err);
+    }
   };
 
   const generateLocalId = () => `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  // ============ TEXT SUBMIT ============
+  // ============ TEXT & IMAGE SUBMIT ============
   const handleSubmit = async () => {
     const text = inputText.trim();
-    if (!text || isSubmitting) return;
+    if ((!text && !pendingAsset) || isSubmitting) return;
 
     setIsSubmitting(true);
     setInputText('');
 
-    const localId = generateLocalId();
-    const optimisticNote: TossNote = {
-      id: localId,
-      type: 'text',
-      content: text,
-      created_at: new Date().toISOString(),
-      status: 'sending',
-      localId,
-    };
-    setNotes((prev) => [...prev, optimisticNote]);
+    if (pendingAsset) {
+      const { asset, localId } = pendingAsset;
+      pendingAssetsRef.current.set(localId, asset);
+      setPendingAsset(null); // Clear preview
 
-    await sendTextNote(localId, text);
+      const optimisticNote: TossNote = {
+        id: localId,
+        type: 'file',
+        content: '',
+        caption: text,
+        created_at: new Date().toISOString(),
+        status: 'sending',
+        localId,
+      };
+      setNotes((prev) => [...prev, optimisticNote]);
+      await uploadImageToSupabase(localId, asset, text);
+    } else {
+      const localId = generateLocalId();
+      const optimisticNote: TossNote = {
+        id: localId,
+        type: 'text',
+        content: text,
+        created_at: new Date().toISOString(),
+        status: 'sending',
+        localId,
+      };
+      setNotes((prev) => [...prev, optimisticNote]);
+      await sendTextNote(localId, text);
+    }
+
     setIsSubmitting(false);
   };
 
@@ -147,7 +189,7 @@ export default function App() {
   const handlePickImage = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permissionResult.granted === false) {
-      Alert.alert('Izin ditolak', 'Anda harus mengizinkan akses galeri untuk mengunggah foto.');
+      Alert.alert('Permission denied', 'You must allow gallery access to upload photos.');
       return;
     }
 
@@ -164,27 +206,15 @@ export default function App() {
 
     // Validasi cepat kalau fileSize sudah tersedia dari picker
     if (asset.fileSize && asset.fileSize > MAX_FILE_SIZE_BYTES) {
-      Alert.alert('File terlalu besar', `Maks 15MB. Ukuran foto: ${(asset.fileSize / 1024 / 1024).toFixed(1)}MB`);
+      Alert.alert('File too large', `Max 15MB. Photo size: ${(asset.fileSize / 1024 / 1024).toFixed(1)}MB`);
       return;
     }
 
     const localId = generateLocalId();
-    pendingAssetsRef.current.set(localId, asset);
-
-    const optimisticNote: TossNote = {
-      id: localId,
-      type: 'file',
-      content: '',
-      created_at: new Date().toISOString(),
-      status: 'sending',
-      localId,
-    };
-    setNotes((prev) => [...prev, optimisticNote]);
-
-    await uploadImageToSupabase(localId, asset);
+    setPendingAsset({ asset, localId });
   };
 
-  const uploadImageToSupabase = async (localId: string, asset: ImagePicker.ImagePickerAsset) => {
+  const uploadImageToSupabase = async (localId: string, asset: ImagePicker.ImagePickerAsset, caption?: string) => {
     setIsUploading(true);
     try {
       const response = await fetch(asset.uri);
@@ -193,7 +223,7 @@ export default function App() {
       // Double-check ukuran blob asli, jaga-jaga kalau fileSize dari picker
       // tidak tersedia (beberapa versi Android/iOS tidak selalu mengisinya)
       if (blob.size > MAX_FILE_SIZE_BYTES) {
-        throw new Error(`File terlalu besar (${(blob.size / 1024 / 1024).toFixed(1)}MB). Maks 15MB.`);
+        throw new Error(`File too large (${(blob.size / 1024 / 1024).toFixed(1)}MB). Max 15MB.`);
       }
 
       const fileExt = asset.uri.split('.').pop()?.split('?')[0] || 'jpg';
@@ -206,9 +236,12 @@ export default function App() {
 
       const { data: publicUrlData } = supabase.storage.from('toss_files').getPublicUrl(fileName);
 
+      const insertData: any = { type: 'file', content: publicUrlData.publicUrl };
+      if (caption) insertData.caption = caption;
+
       const { data, error: insertError } = await supabase
         .from('toss_notes')
-        .insert([{ type: 'file', content: publicUrlData.publicUrl }])
+        .insert([insertData])
         .select()
         .single();
         
@@ -219,7 +252,7 @@ export default function App() {
         } catch (rollbackErr) {
           console.error('Failed to rollback orphaned file:', rollbackErr);
         }
-        throw insertError || new Error('Gagal menyimpan ke database');
+        throw insertError || new Error('Failed to save to database');
       }
 
       pendingAssetsRef.current.delete(localId);
@@ -229,7 +262,7 @@ export default function App() {
       setNotes((prev) =>
         prev.map((n) =>
           n.localId === localId
-            ? { ...n, status: 'error', errorMessage: error.message || 'Gagal mengunggah foto' }
+            ? { ...n, status: 'error', errorMessage: error.message || 'Failed to upload photo' }
             : n
         )
       );
@@ -242,14 +275,14 @@ export default function App() {
     if (!note.localId) return;
     const asset = pendingAssetsRef.current.get(note.localId);
     if (!asset) {
-      Alert.alert('Gagal Retry', 'Foto asli tidak lagi tersimpan di memori. Silakan upload ulang secara manual.');
+      Alert.alert('Retry Failed', 'Original photo is no longer in memory. Please upload manually again.');
       setNotes((prev) => prev.filter((n) => n.localId !== note.localId));
       return;
     }
     setNotes((prev) =>
       prev.map((n) => (n.localId === note.localId ? { ...n, status: 'sending', errorMessage: undefined } : n))
     );
-    await uploadImageToSupabase(note.localId, asset);
+    await uploadImageToSupabase(note.localId, asset, note.caption);
   };
 
   // ============ DELETE ============
@@ -267,8 +300,8 @@ export default function App() {
 
     const { error } = await supabase.from('toss_notes').delete().eq('id', note.id);
     if (error) {
-      console.error('Gagal menghapus note:', error);
-      Alert.alert('Gagal', 'Gagal menghapus pesan, coba lagi.');
+      console.error('Failed to delete note:', error);
+      Alert.alert('Failed', 'Failed to delete message, please try again.');
       setNotes((prev) =>
         [...prev, note].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       );
@@ -298,6 +331,58 @@ export default function App() {
     return decodeURIComponent(lastPart.split('?')[0]).substring(14);
   };
 
+  const getOneMonthAgoDateObj = () => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d;
+  };
+
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    setShowDatePicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setTempDate(selectedDate);
+      const isoStr = selectedDate.toISOString().split('T')[0];
+      setCustomDate(isoStr);
+    }
+  };
+
+  const filteredNotes = notes
+    .filter((note) => {
+      const matchSearch = note.content.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      let matchDate = true;
+      if (filterType !== 'all') {
+        const noteDate = new Date(note.created_at);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const noteDay = new Date(noteDate);
+        noteDay.setHours(0, 0, 0, 0);
+        
+        if (filterType === 'today') {
+          matchDate = noteDay.getTime() === today.getTime();
+        } else if (filterType === 'yesterday') {
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+          matchDate = noteDay.getTime() === yesterday.getTime();
+        } else if (filterType === '7days') {
+          const sevenDaysAgo = new Date(today);
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+          matchDate = noteDay.getTime() >= sevenDaysAgo.getTime();
+        } else if (filterType === 'month') {
+          matchDate = noteDate.getMonth() === today.getMonth() && noteDate.getFullYear() === today.getFullYear();
+        } else if (filterType === 'custom' && customDate) {
+          matchDate = note.created_at.startsWith(customDate);
+        }
+      }
+      
+      return matchSearch && matchDate;
+    })
+    .sort((a, b) => {
+      const timeA = new Date(a.created_at).getTime();
+      const timeB = new Date(b.created_at).getTime();
+      return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+    });
+
   const renderItem = ({ item }: { item: TossNote }) => (
     <Pressable
       style={[styles.card, item.status === 'error' && styles.cardError]}
@@ -306,17 +391,24 @@ export default function App() {
       {item.status === 'sending' && item.type === 'file' ? (
         <View style={styles.uploadPlaceholder}>
           <ActivityIndicator color="#94a3b8" size="small" />
-          <Text style={styles.uploadPlaceholderText}>Mengunggah foto...</Text>
+          <Text style={styles.uploadPlaceholderText}>Uploading photo...</Text>
         </View>
       ) : item.type === 'file' && item.content ? (
-        isImageFile(item.content) ? (
-          <Image source={{ uri: item.content }} style={styles.cardImage} resizeMode="cover" />
-        ) : (
-          <TouchableOpacity style={[styles.fileLinkButton, { flexDirection: 'row', alignItems: 'center', gap: 6 }]} onPress={() => Linking.openURL(item.content)}>
-            <Feather name="download-cloud" size={16} color="#3b82f6" />
-            <Text style={styles.fileLinkText}>Download: {getFileNameFromUrl(item.content)}</Text>
-          </TouchableOpacity>
-        )
+        <View>
+          {isImageFile(item.content) ? (
+            <Image source={{ uri: item.content }} style={styles.cardImage} resizeMode="cover" />
+          ) : (
+            <TouchableOpacity style={[styles.fileLinkButton, { flexDirection: 'row', alignItems: 'center', gap: 6 }]} onPress={() => Linking.openURL(item.content)}>
+              <Feather name="download-cloud" size={16} color="#3b82f6" />
+              <Text style={styles.fileLinkText}>Download: {getFileNameFromUrl(item.content)}</Text>
+            </TouchableOpacity>
+          )}
+          {item.caption && (
+            <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8 }}>
+              <Text style={{ color: '#f1f5f9', fontSize: 14 }}>{item.caption}</Text>
+            </View>
+          )}
+        </View>
       ) : (
         <Text style={styles.cardContent}>{item.content}</Text>
       )}
@@ -324,7 +416,7 @@ export default function App() {
       <View style={styles.cardFooter}>
         {item.status === 'error' ? (
           <>
-            <Text style={styles.cardErrorText}>{item.errorMessage || 'Gagal terkirim'}</Text>
+            <Text style={styles.cardErrorText}>{item.errorMessage || 'Failed to send'}</Text>
             <TouchableOpacity
               style={styles.btnRetry}
               onPress={() => (item.type === 'text' ? retryTextNote(item) : retryImageUpload(item))}
@@ -335,7 +427,7 @@ export default function App() {
         ) : (
           <>
             <Text style={styles.cardTime}>
-              {item.status === 'sending' ? 'Mengirim...' : formatTime(item.created_at)}
+              {item.status === 'sending' ? 'Sending...' : formatTime(item.created_at)}
             </Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {item.status !== 'sending' && (
@@ -346,7 +438,7 @@ export default function App() {
                   <Feather name="trash-2" size={14} color="#f87171" />
                 </TouchableOpacity>
               )}
-              {item.status !== 'sending' && item.type === 'text' && (
+              {item.status !== 'sending' && (
                 <TouchableOpacity
                   style={[styles.btnCopy, copiedId === item.id && styles.btnCopied]}
                   onPress={() => handleCopy(item.id, item.content)}
@@ -379,23 +471,64 @@ export default function App() {
             <Feather name="search" size={16} color="#94a3b8" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Cari..."
+              placeholder="Search..."
               placeholderTextColor="#94a3b8"
               value={searchTerm}
               onChangeText={setSearchTerm}
             />
           </View>
-          <TextInput
-            style={styles.dateInput}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor="#94a3b8"
-            value={filterDate}
-            onChangeText={setFilterDate}
-            maxLength={10}
-          />
           <TouchableOpacity style={styles.sortButton} onPress={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}>
             <Feather name={sortOrder === 'asc' ? 'arrow-down' : 'arrow-up'} size={16} color="#f1f5f9" />
           </TouchableOpacity>
+        </View>
+
+        {/* CHIP FILTERS */}
+        <View style={{ borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.08)' }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipContainer}>
+            {['all', 'today', 'yesterday', '7days', 'month', 'custom'].map(type => {
+              const labels: Record<string, string> = {
+                all: 'All Time', today: 'Today', yesterday: 'Yesterday', '7days': 'Last 7 Days', month: 'This Month', custom: 'Choose Date'
+              };
+              return (
+                <TouchableOpacity
+                  key={type}
+                  style={[styles.chip, filterType === type && styles.chipActive]}
+                  onPress={() => {
+                    setFilterType(type);
+                    if (type === 'custom') {
+                      setShowDatePicker(true);
+                    } else {
+                      setCustomDate('');
+                      setShowDatePicker(false);
+                    }
+                  }}
+                >
+                  <Text style={[styles.chipText, filterType === type && styles.chipTextActive]}>
+                    {labels[type]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          
+          {showDatePicker && (
+            <DateTimePicker
+              value={tempDate}
+              mode="date"
+              display="default"
+              minimumDate={getOneMonthAgoDateObj()}
+              maximumDate={new Date()}
+              onChange={handleDateChange}
+            />
+          )}
+
+          {filterType === 'custom' && customDate ? (
+            <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
+              <Text style={{ color: '#60a5fa', fontSize: 13, fontWeight: '600' }}>
+                Selected: {customDate}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {/* LIST AREA */}
@@ -403,24 +536,19 @@ export default function App() {
           {notes.length === 0 ? (
             <View style={styles.emptyState}>
               <Feather name="inbox" size={48} color="#64748b" style={{ marginBottom: 12 }} />
-              <Text style={styles.emptyStateTitle}>Belum ada apa-apa di sini.</Text>
-              <Text style={styles.emptyStateSub}>Coba lempar teks atau file dari device lain.</Text>
+              <Text style={styles.emptyStateTitle}>No items found.</Text>
+              <Text style={styles.emptyStateSub}>Try tossing text or files from another device.</Text>
+            </View>
+          ) : filteredNotes.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Feather name="file-minus" size={48} color="#64748b" style={{ marginBottom: 12, opacity: 0.5 }} />
+              <Text style={styles.emptyStateTitle}>No results found.</Text>
+              <Text style={styles.emptyStateSub}>No messages match your current filter.</Text>
             </View>
           ) : (
             <FlatList
               ref={flatListRef}
-              data={notes
-                .filter((note) => {
-                  const matchSearch = note.content.toLowerCase().includes(searchTerm.toLowerCase());
-                  const matchDate = filterDate ? note.created_at.startsWith(filterDate) : true;
-                  return matchSearch && matchDate;
-                })
-                .sort((a, b) => {
-                  const timeA = new Date(a.created_at).getTime();
-                  const timeB = new Date(b.created_at).getTime();
-                  return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
-                })
-              }
+              data={filteredNotes}
               keyExtractor={(item) => item.localId || item.id}
               renderItem={renderItem}
               contentContainerStyle={styles.flatListContent}
@@ -432,36 +560,51 @@ export default function App() {
         </View>
 
         {/* INPUT AREA */}
-        <View style={styles.inputArea}>
-          <TouchableOpacity style={styles.btnAttach} onPress={handlePickImage} disabled={isUploading}>
-            {isUploading ? (
-              <ActivityIndicator color="#94a3b8" size="small" />
-            ) : (
-              <Feather name="paperclip" size={20} color="#f1f5f9" />
-            )}
-          </TouchableOpacity>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Ketik pesan..."
-            placeholderTextColor="#94a3b8"
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={2000}
-            editable={!isSubmitting}
-          />
-          <TouchableOpacity
-            style={[styles.btnSubmit, (!inputText.trim() || isSubmitting) && styles.btnSubmitDisabled]}
-            onPress={handleSubmit}
-            disabled={!inputText.trim() || isSubmitting}
-            activeOpacity={0.8}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.btnSubmitText}>Toss</Text>
-            )}
-          </TouchableOpacity>
+        <View style={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.08)' }}>
+          {pendingAsset && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: '#1e293b', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Image source={{ uri: pendingAsset.asset.uri }} style={{ width: 36, height: 36, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.2)' }} />
+                <Text style={{ color: '#cbd5e1', fontSize: 13, flexShrink: 1 }} numberOfLines={1}>
+                  {pendingAsset.asset.fileName || 'Image selected'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setPendingAsset(null)} style={{ padding: 4 }}>
+                <Feather name="trash-2" size={16} color="#f87171" />
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={styles.inputArea}>
+            <TouchableOpacity style={styles.btnAttach} onPress={handlePickImage} disabled={isUploading}>
+              {isUploading ? (
+                <ActivityIndicator color="#94a3b8" size="small" />
+              ) : (
+                <Feather name="paperclip" size={20} color="#f1f5f9" />
+              )}
+            </TouchableOpacity>
+            <TextInput
+              style={styles.textInput}
+              placeholder={pendingAsset ? 'Type a caption or comment...' : 'Type a message...'}
+              placeholderTextColor="#94a3b8"
+              value={inputText}
+              onChangeText={setInputText}
+              multiline
+              maxLength={2000}
+              editable={!isSubmitting}
+            />
+            <TouchableOpacity
+              style={[styles.btnSubmit, ((!inputText.trim() && !pendingAsset) || isSubmitting) && styles.btnSubmitDisabled]}
+              onPress={handleSubmit}
+              disabled={(!inputText.trim() && !pendingAsset) || isSubmitting}
+              activeOpacity={0.8}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.btnSubmitText}>Toss</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
 
@@ -469,17 +612,17 @@ export default function App() {
       <Modal transparent visible={!!showDeleteModal} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Hapus Pesan?</Text>
-            <Text style={styles.modalDesc}>Pesan ini akan terhapus dari semua perangkat Anda.</Text>
+            <Text style={styles.modalTitle}>Delete Message?</Text>
+            <Text style={styles.modalDesc}>This message will be deleted from all devices.</Text>
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.btnModalCancel} onPress={() => setShowDeleteModal(null)}>
-                <Text style={styles.btnModalCancelText}>Batal</Text>
+                <Text style={styles.btnModalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.btnModalDelete} onPress={() => {
                 if (showDeleteModal) handleDeleteNote(showDeleteModal);
                 setShowDeleteModal(null);
               }}>
-                <Text style={styles.btnModalDeleteText}>Hapus</Text>
+                <Text style={styles.btnModalDeleteText}>Delete</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -539,16 +682,30 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingLeft: 8,
   },
-  dateInput: {
-    width: 100,
+  chipContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
     backgroundColor: 'rgba(30, 41, 59, 0.8)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
-    color: '#f1f5f9',
-    fontSize: 13,
-    paddingHorizontal: 10,
-    textAlign: 'center',
+  },
+  chipActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: '#3b82f6',
+  },
+  chipText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  chipTextActive: {
+    color: '#60a5fa',
   },
   sortButton: {
     backgroundColor: 'rgba(30, 41, 59, 0.8)',
@@ -686,9 +843,6 @@ const styles = StyleSheet.create({
   inputArea: {
     flexDirection: 'row',
     padding: 16,
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'flex-end',
     gap: 10,
   },
