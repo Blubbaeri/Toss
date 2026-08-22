@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import { enable, isEnabled, disable } from '@tauri-apps/plugin-autostart';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
+import { Power, Trash2, Copy, CheckCheck, Paperclip, Inbox, DownloadCloud } from 'lucide-react';
 import './App.css';
 
 // Batas maksimal ukuran file yang boleh diupload
@@ -355,7 +356,8 @@ function App() {
           }}
           title={autoStartEnabled ? 'Auto-start saat Windows menyala (Aktif)' : 'Auto-start saat Windows menyala (Mati)'}
         >
-          {autoStartEnabled ? '🚀 Auto-Start: ON' : '⚙️ Auto-Start: OFF'}
+          <Power size={14} style={{ marginRight: '6px' }} />
+          {autoStartEnabled ? 'Auto-Start: ON' : 'Auto-Start: OFF'}
         </button>
       </header>
 
@@ -363,20 +365,7 @@ function App() {
       <main className="toss-list-area" ref={listAreaRef}>
         {notes.length === 0 ? (
           <div className="empty-state">
-            <svg
-              className="empty-state-icon"
-              width="64"
-              height="64"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
+            <Inbox size={48} color="#64748b" style={{ marginBottom: '12px' }} />
             <p>Belum ada apa-apa di sini.</p>
             <p className="empty-state-sub">Coba lempar teks atau file dari device lain.</p>
           </div>
@@ -394,19 +383,8 @@ function App() {
                 isImageFile(note.content) ? (
                   <img src={note.content} alt="Tossed file" className="toss-image" />
                 ) : (
-                  <a href={note.content} target="_blank" rel="noopener noreferrer" className="toss-file-link">
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-                    </svg>
+                  <a href={note.content} target="_blank" rel="noopener noreferrer" className="toss-file-link" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <DownloadCloud size={16} />
                     Download File ({getFileNameFromUrl(note.content).substring(14)})
                   </a>
                 )
@@ -435,35 +413,9 @@ function App() {
                         className={`btn-copy ${copiedId === note.id ? 'copied' : ''}`}
                         onClick={() => handleCopy(note.id, note.content)}
                         title="Copy to clipboard"
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
                       >
-                        {copiedId === note.id ? (
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                          </svg>
-                        ) : (
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                          </svg>
-                        )}
+                        {copiedId === note.id ? <CheckCheck size={14} /> : <Copy size={14} />}
                         {copiedId === note.id ? 'Copied' : 'Copy'}
                       </button>
                     )}
@@ -490,18 +442,7 @@ function App() {
           {isUploading ? (
             <span style={{ fontSize: '12px' }}>...</span>
           ) : (
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-            </svg>
+            <Paperclip size={18} />
           )}
         </button>
         <textarea
@@ -527,12 +468,13 @@ function App() {
         >
           <button
             className="context-menu-item context-menu-delete"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
             onClick={() => {
               handleDeleteNote(contextMenu.note);
               setContextMenu(null);
             }}
           >
-            🗑 Hapus Pesan
+            <Trash2 size={14} /> Hapus Pesan
           </button>
         </div>
       )}
