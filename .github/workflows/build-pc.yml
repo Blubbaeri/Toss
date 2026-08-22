@@ -29,3 +29,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: ./toss-pc
+          tagName: v__VERSION__
+          releaseName: 'Toss PC v__VERSION__'
+          releaseDraft: true
