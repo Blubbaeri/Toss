@@ -224,8 +224,13 @@ function App() {
       return;
     }
 
-    // Ganti entry optimistic dengan data asli dari server
-    setNotes((prev) => prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n)));
+    // Ganti entry optimistic dengan data asli dari server, atau hapus jika event Realtime sudah menambahkannya
+    setNotes((prev) => {
+      if (prev.some((n) => n.id === data.id && !n.localId)) {
+        return prev.filter((n) => n.localId !== localId);
+      }
+      return prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n));
+    });
   };
 
   const retryTextNote = async (note: TossNote) => {
@@ -285,7 +290,12 @@ function App() {
       }
 
       pendingFilesRef.current.delete(localId);
-      setNotes((prev) => prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n)));
+      setNotes((prev) => {
+        if (prev.some((n) => n.id === data.id && !n.localId)) {
+          return prev.filter((n) => n.localId !== localId);
+        }
+        return prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n));
+      });
     } catch (error: any) {
       console.error('Upload error:', error);
       setNotes((prev) =>

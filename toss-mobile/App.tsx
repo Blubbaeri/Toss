@@ -22,6 +22,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as FileSystem from 'expo-file-system';
+import { decode } from 'base64-arraybuffer';
 import { supabase } from './src/lib/supabase';
 
 // Batas maksimal ukuran file yang boleh diupload
@@ -174,7 +176,12 @@ export default function App() {
       return;
     }
 
-    setNotes((prev) => prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n)));
+    setNotes((prev) => {
+      if (prev.some((n) => n.id === data.id && !n.localId)) {
+        return prev.filter((n) => n.localId !== localId);
+      }
+      return prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n));
+    });
   };
 
   const retryTextNote = async (note: TossNote) => {
@@ -217,19 +224,25 @@ export default function App() {
   const uploadImageToSupabase = async (localId: string, asset: ImagePicker.ImagePickerAsset, caption?: string) => {
     setIsUploading(true);
     try {
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
+      // Pada Android APK (compiled), fetch(asset.uri).blob() sering gagal (Network Request Failed).
+      // Pendekatan yang lebih stabil adalah membaca file sebagai Base64 dengan expo-file-system, 
+      // lalu men-decode-nya ke ArrayBuffer untuk di-upload ke Supabase Storage.
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: 'base64',
+      });
 
-      // Double-check ukuran blob asli, jaga-jaga kalau fileSize dari picker
-      // tidak tersedia (beberapa versi Android/iOS tidak selalu mengisinya)
-      if (blob.size > MAX_FILE_SIZE_BYTES) {
-        throw new Error(`File too large (${(blob.size / 1024 / 1024).toFixed(1)}MB). Max 15MB.`);
+      // Estimasi ukuran file dari base64 (approx: panjang string * 3/4)
+      const approxSize = Math.round(base64.length * 3 / 4);
+      if (approxSize > MAX_FILE_SIZE_BYTES) {
+        throw new Error(`File too large (${(approxSize / 1024 / 1024).toFixed(1)}MB). Max 15MB.`);
       }
+
+      const arrayBuffer = decode(base64);
 
       const fileExt = asset.uri.split('.').pop()?.split('?')[0] || 'jpg';
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage.from('toss_files').upload(fileName, blob, {
+      const { error: uploadError } = await supabase.storage.from('toss_files').upload(fileName, arrayBuffer, {
         contentType: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
       });
       if (uploadError) throw uploadError;
@@ -256,7 +269,12 @@ export default function App() {
       }
 
       pendingAssetsRef.current.delete(localId);
-      setNotes((prev) => prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n)));
+      setNotes((prev) => {
+        if (prev.some((n) => n.id === data.id && !n.localId)) {
+          return prev.filter((n) => n.localId !== localId);
+        }
+        return prev.map((n) => (n.localId === localId ? { ...data, status: 'sent' } : n));
+      });
     } catch (error: any) {
       console.error('Upload error:', error);
       setNotes((prev) =>
