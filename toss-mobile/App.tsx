@@ -74,6 +74,7 @@ export default function App() {
   const [inputText, setInputText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -115,6 +116,7 @@ export default function App() {
   }, []);
 
   const fetchInitialNotes = async () => {
+    setIsRefreshing(true);
     try {
       const { data, error } = await supabase
         .from('toss_notes')
@@ -127,7 +129,7 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
-
+    setIsRefreshing(false);
     cleanupOldData();
   };
 
@@ -536,8 +538,12 @@ export default function App() {
           <TouchableOpacity style={styles.sortButton} onPress={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}>
             <Feather name={sortOrder === 'asc' ? 'arrow-down' : 'arrow-up'} size={16} color="#f1f5f9" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.sortButton} onPress={fetchInitialNotes}>
-            <Feather name="refresh-cw" size={16} color="#60a5fa" />
+          <TouchableOpacity style={styles.sortButton} onPress={fetchInitialNotes} disabled={isRefreshing}>
+            {isRefreshing ? (
+              <ActivityIndicator color="#60a5fa" size="small" />
+            ) : (
+              <Feather name="refresh-cw" size={16} color="#60a5fa" />
+            )}
           </TouchableOpacity>
         </View>
 

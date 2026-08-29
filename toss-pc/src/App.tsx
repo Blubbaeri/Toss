@@ -27,6 +27,7 @@ function App() {
   const [inputText, setInputText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [autoStartEnabled, setAutoStartEnabled] = useState(false);
 
@@ -118,6 +119,7 @@ function App() {
   }, [notes]);
 
   const fetchInitialNotes = async () => {
+    setIsRefreshing(true);
     // Hanya fetch data 1 bulan terakhir
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
@@ -137,6 +139,7 @@ function App() {
 
     // Jalankan pembersihan DB background (hapus data > 3 bulan)
     cleanupOldData();
+    setIsRefreshing(false);
   };
 
   const cleanupOldData = async () => {
@@ -510,10 +513,11 @@ function App() {
         </button>
         <button 
           onClick={fetchInitialNotes}
-          style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+          disabled={isRefreshing}
+          style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '4px', cursor: isRefreshing ? 'not-allowed' : 'pointer' }}
           title="Refresh messages"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={14} className={isRefreshing ? "lucide-spin" : ""} />
         </button>
       </div>
 
