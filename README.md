@@ -1,6 +1,6 @@
 # Toss
 
-Toss adalah aplikasi lintas perangkat untuk berbagi catatan dan file secara instan antara Desktop (Windows) dan Mobile menggunakan sinkronisasi Supabase Realtime.
+Toss is a cross-platform application for instantly sharing notes and files between Desktop (Windows) and Mobile using Supabase Realtime synchronization.
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/USERNAME/toss/build-pc.yml?label=Windows%20Build)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -8,73 +8,73 @@ Toss adalah aplikasi lintas perangkat untuk berbagi catatan dan file secara inst
 ![Expo](https://img.shields.io/badge/Expo-SDK_54-000020?logo=expo&logoColor=white)
 
 ## Table of Contents
-- [Tentang Proyek](#tentang-proyek)
-- [Fitur Utama](#fitur-utama)
-- [Persiapan Sistem](#persiapan-sistem)
-- [Instalasi](#instalasi)
-- [Penggunaan](#penggunaan)
-- [Struktur Direktori](#struktur-direktori)
-- [Lisensi](#lisensi)
+- [About the Project](#about-the-project)
+- [Key Features](#key-features)
+- [System Setup](#system-setup)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Directory Structure](#directory-structure)
+- [License](#license)
 
 ---
 
-## Tentang Proyek
-Toss dikembangkan untuk menyederhanakan transfer teks dan file antar perangkat yang seringkali memakan waktu. Dengan arsitektur yang terhubung langsung secara realtime ke database cloud (Supabase), pengguna dapat mengirim data dengan latensi minimal. Sistem ini dibagi menjadi dua klien utama: `toss-pc` yang berjalan secara native di Windows, dan `toss-mobile` yang berjalan di Android/iOS.
+## About the Project
+Toss was developed to simplify the often time-consuming transfer of text and files between devices. With an architecture connected directly in real-time to a cloud database (Supabase), users can send data with minimal latency. This system is divided into two main clients: `toss-pc` which runs natively on Windows, and `toss-mobile` which runs on Android/iOS.
 
 ---
 
-## Fitur Utama
-- Sinkronisasi realtime data menggunakan channel PostgreSQL.
-- Dukungan transfer teks dan gambar hingga 15MB.
-- Klien Desktop Native dengan dukungan berjalan di latar belakang (System Tray).
-- Pintasan keyboard global (`Ctrl+Shift+V`) untuk memanggil jendela aplikasi dari mana saja.
-- Auto-start otomatis saat sistem operasi melakukan booting.
-- Notifikasi native Windows saat menerima pesan dari perangkat lain.
+## Key Features
+- Real-time data synchronization using PostgreSQL channels.
+- Support for text and image transfers up to 15MB.
+- Native Desktop Client with background execution support (System Tray).
+- Global keyboard shortcut (`Ctrl+Shift+V`) to summon the app window from anywhere.
+- Auto-start automatically when the operating system boots.
+- Native Windows notifications when receiving messages from other devices.
 
 ---
 
-## Persiapan Sistem
+## System Setup
 
 > [!WARNING]
-> **PENTING: Gunakan Database Supabase Anda Sendiri!**
-> Jika Anda men-*clone* atau melakukan *fork* pada repositori ini, Anda **WAJIB** membuat akun dan proyek [Supabase](https://supabase.com/) Anda sendiri. 
-> Anda tidak bisa/boleh menggunakan kredensial database asli milik pembuat repositori ini.
+> **IMPORTANT: Use Your Own Supabase Database!**
+> If you clone or fork this repository, you **MUST** create your own [Supabase](https://supabase.com/) account and project. 
+> You cannot/must not use the original database credentials belonging to the creator of this repository.
 
-**Langkah Persiapan:**
-1. Buat proyek baru secara gratis di [Supabase](https://supabase.com/).
-2. Buat tabel bernama `toss_notes` dan aktifkan fitur *Realtime*.
-3. Buat *bucket storage* bernama `toss_files` (publik) untuk menyimpan unggahan file/gambar.
-4. Dapatkan `Project URL` dan `anon key` dari pengaturan API Supabase Anda.
-5. Buat file `.env` di masing-masing folder klien, dan isi dengan kredensial Anda sendiri:
+**Setup Steps:**
+1. Create a new free project on [Supabase](https://supabase.com/).
+2. Create a table named `toss_notes` and enable the *Realtime* feature.
+3. Create a public *storage bucket* named `toss_files` to store uploaded files/images.
+4. Get the `Project URL` and `anon key` from your Supabase API settings.
+5. Create a `.env` file in each client folder, and fill it with your own credentials:
 
-**Untuk PC (`toss-pc/.env`):**
+**For PC (`toss-pc/.env`):**
 ```env
-VITE_SUPABASE_URL=https://proyek-anda.supabase.co
-VITE_SUPABASE_ANON_KEY=anon_key_proyek_anda
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your_project_anon_key
 ```
 
-**Untuk Mobile (`toss-mobile/.env`):**
+**For Mobile (`toss-mobile/.env`):**
 ```env
-EXPO_PUBLIC_SUPABASE_URL=https://proyek-anda.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=anon_key_proyek_anda
+EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_project_anon_key
 ```
 
-## Instalasi
+## Installation
 
-Unduh repositori ke sistem lokal Anda:
+Download the repository to your local system:
 ```bash
 git clone https://github.com/USERNAME/toss.git
 cd toss
 ```
 
-### Klien PC (Tauri + React)
+### PC Client (Tauri + React)
 ```bash
 cd toss-pc
 npm install
 npm run tauri dev
 ```
 
-### Klien Mobile (Expo + React Native)
+### Mobile Client (Expo + React Native)
 ```bash
 cd toss-mobile
 npm install
@@ -83,21 +83,21 @@ npx expo start -c
 
 ---
 
-## Penggunaan
-1. Jalankan klien desktop dan biarkan berjalan di background.
-2. Jalankan klien mobile dan pindai kode QR menggunakan aplikasi Expo Go.
-3. Ketik teks atau pilih lampiran file dari ponsel Anda, lalu tekan tombol kirim.
-4. Teks atau file akan seketika muncul di klien PC, memicu notifikasi native Windows jika jendela aplikasi tidak sedang fokus.
-5. Gunakan `Ctrl+Shift+V` dari aplikasi apa pun di PC Anda untuk segera membuka dan membalas pesan.
+## Usage
+1. Run the desktop client and let it run in the background.
+2. Run the mobile client and scan the QR code using the Expo Go app.
+3. Type text or select a file attachment from your phone, then press send.
+4. The text or file will instantly appear on the PC client, triggering a native Windows notification if the app window is not in focus.
+5. Use `Ctrl+Shift+V` from any app on your PC to quickly open and reply to messages.
 
 ---
 
-## Struktur Direktori
-- `/toss-pc` — Kode sumber aplikasi desktop berbasis Tauri (React, TypeScript, Rust).
-- `/toss-mobile` — Kode sumber aplikasi mobile berbasis Expo (React Native, TypeScript).
-- `/.github/workflows` — Konfigurasi CI/CD untuk otomatisasi kompilasi `.exe` via GitHub Actions.
+## Directory Structure
+- `/toss-pc` — Source code for the Tauri-based desktop application (React, TypeScript, Rust).
+- `/toss-mobile` — Source code for the Expo-based mobile application (React Native, TypeScript).
+- `/.github/workflows` — CI/CD configuration for automated `.exe` compilation via GitHub Actions.
 
 ---
 
-## Lisensi
-Proyek ini didistribusikan di bawah lisensi MIT. Silakan periksa berkas `LICENSE` untuk informasi lebih lanjut.
+## License
+This project is distributed under the MIT License. Please check the `LICENSE` file for more information.
