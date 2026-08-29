@@ -34,13 +34,30 @@ Toss dikembangkan untuk menyederhanakan transfer teks dan file antar perangkat y
 ---
 
 ## Persiapan Sistem
-> **Catatan:** Pastikan environment variable `.env` sudah dikonfigurasi di setiap direktori klien (`toss-pc` dan `toss-mobile`) sebelum menjalankan aplikasi.
 
-Anda memerlukan konfigurasi kredensial Supabase berikut agar sinkronisasi dapat berjalan:
-- `VITE_SUPABASE_URL` (PC) / `EXPO_PUBLIC_SUPABASE_URL` (Mobile)
-- `VITE_SUPABASE_ANON_KEY` (PC) / `EXPO_PUBLIC_SUPABASE_ANON_KEY` (Mobile)
+> [!WARNING]
+> **PENTING: Gunakan Database Supabase Anda Sendiri!**
+> Jika Anda men-*clone* atau melakukan *fork* pada repositori ini, Anda **WAJIB** membuat akun dan proyek [Supabase](https://supabase.com/) Anda sendiri. 
+> Anda tidak bisa/boleh menggunakan kredensial database asli milik pembuat repositori ini.
 
----
+**Langkah Persiapan:**
+1. Buat proyek baru secara gratis di [Supabase](https://supabase.com/).
+2. Buat tabel bernama `toss_notes` dan aktifkan fitur *Realtime*.
+3. Buat *bucket storage* bernama `toss_files` (publik) untuk menyimpan unggahan file/gambar.
+4. Dapatkan `Project URL` dan `anon key` dari pengaturan API Supabase Anda.
+5. Buat file `.env` di masing-masing folder klien, dan isi dengan kredensial Anda sendiri:
+
+**Untuk PC (`toss-pc/.env`):**
+```env
+VITE_SUPABASE_URL=https://proyek-anda.supabase.co
+VITE_SUPABASE_ANON_KEY=anon_key_proyek_anda
+```
+
+**Untuk Mobile (`toss-mobile/.env`):**
+```env
+EXPO_PUBLIC_SUPABASE_URL=https://proyek-anda.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=anon_key_proyek_anda
+```
 
 ## Instalasi
 
