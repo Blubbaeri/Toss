@@ -94,7 +94,7 @@ body, html, #root {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  animation: slideIn 0.3s ease-out;
+  animation: blurReveal 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   word-break: break-word;
 }
 
@@ -263,15 +263,47 @@ body, html, #root {
 }
 
 /* Animations */
-@keyframes slideIn {
+@keyframes blurReveal {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: scale(0.95) translateY(10px);
+    filter: blur(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: scale(1) translateY(0);
+    filter: blur(0);
   }
+}
+
+@keyframes cyberPulse {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); border-color: rgba(59, 130, 246, 0.6); }
+  70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); border-color: rgba(59, 130, 246, 0.2); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); border-color: var(--border); }
+}
+
+@keyframes glitchDissolve {
+  0% { opacity: 1; transform: scaleY(1); filter: contrast(1); border-color: rgba(248, 113, 113, 0.5); }
+  40% { opacity: 0.8; transform: scaleY(0.95) skewX(2deg); filter: contrast(1.5) hue-rotate(-20deg); box-shadow: inset 0 0 20px rgba(248, 113, 113, 0.2); }
+  100% { opacity: 0; transform: scaleY(0.8) skewX(-2deg); filter: blur(5px); border-color: transparent; }
+}
+
+.toss-card-sending {
+  animation: cyberPulse 1.5s infinite;
+}
+
+.toss-card-deleting {
+  animation: glitchDissolve 0.5s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
+  pointer-events: none;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.lucide-spin {
+  animation: spin 1s linear infinite;
 }
 
 .empty-state {
@@ -365,7 +397,7 @@ body, html, #root {
   width: 320px;
   text-align: center;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  animation: slideIn 0.2s ease-out;
+  animation: blurReveal 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 .btn-modal-cancel {
   background: transparent;

@@ -17,6 +17,9 @@ import {
   Pressable,
   Modal,
   ScrollView,
+  LayoutAnimation,
+  UIManager,
+  Animated,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,7 +32,30 @@ import { supabase } from './src/lib/supabase';
 // Batas maksimal ukuran file yang boleh diupload
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
 
-type NoteStatus = 'sending' | 'sent' | 'error';
+type NoteStatus = 'sending' | 'sent' | 'error' | 'deleting';
+
+// Aktifkan LayoutAnimation di Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Konfigurasi Bouncy Spring yang unik untuk entrance/exit
+const CustomLayoutAnimation = {
+  duration: 400,
+  create: {
+    type: LayoutAnimation.Types.spring,
+    property: LayoutAnimation.Properties.scaleXY,
+    springDamping: 0.6,
+  },
+  update: {
+    type: LayoutAnimation.Types.spring,
+    springDamping: 0.6,
+  },
+  delete: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+    property: LayoutAnimation.Properties.opacity,
+  },
+};
 
 interface TossNote {
   id: string;
@@ -68,16 +94,18 @@ export default function App() {
 
     const channel = supabase
       .channel('toss_notes_channel')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'toss_notes' }, (payload) => {
-        const newNote = payload.new as TossNote;
-        setNotes((prev) => {
-          if (prev.some((n) => n.id === newNote.id)) return prev;
-          return [...prev, { ...newNote, status: 'sent' }];
-        });
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'toss_notes' }, (payload) => {
-        const oldNote = payload.old as TossNote;
-        setNotes((prev) => prev.filter((n) => n.id !== oldNote.id));
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'toss_notes' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          LayoutAnimation.configureNext(CustomLayoutAnimation);
+          setNotes((prev) => {
+            if (prev.some((n) => n.id === payload.new.id)) return prev;
+            return [...prev, payload.new as TossNote];
+          });
+        }
+        if (payload.eventType === 'DELETE') {
+          LayoutAnimation.configureNext(CustomLayoutAnimation);
+          setNotes((prev) => prev.filter((n) => n.id !== payload.old.id));
+        }
       })
       .subscribe();
 
@@ -87,20 +115,17 @@ export default function App() {
   }, []);
 
   const fetchInitialNotes = async () => {
-    const oneMonthAgo = new Date();
-    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-    const oneMonthAgoIso = oneMonthAgo.toISOString();
-
-    const { data, error } = await supabase
-      .from('toss_notes')
-      .select('*')
-      .gte('created_at', oneMonthAgoIso)
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching notes:', error);
-    } else if (data) {
-      setNotes(data.map((n) => ({ ...n, status: 'sent' as NoteStatus })));
+    try {
+      const { data, error } = await supabase
+        .from('toss_notes')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (data) {
+        LayoutAnimation.configureNext(CustomLayoutAnimation);
+        setNotes(data.map((n) => ({ ...n, status: 'sent' as NoteStatus })));
+      }
+    } catch (err) {
+      console.error(err);
     }
 
     cleanupOldData();
@@ -140,6 +165,7 @@ export default function App() {
         status: 'sending',
         localId,
       };
+      LayoutAnimation.configureNext(CustomLayoutAnimation);
       setNotes((prev) => [...prev, optimisticNote]);
       await uploadImageToSupabase(localId, asset, text);
     } else {
@@ -152,6 +178,7 @@ export default function App() {
         status: 'sending',
         localId,
       };
+      LayoutAnimation.configureNext(CustomLayoutAnimation);
       setNotes((prev) => [...prev, optimisticNote]);
       await sendTextNote(localId, text);
     }
@@ -224,14 +251,10 @@ export default function App() {
   const uploadImageToSupabase = async (localId: string, asset: ImagePicker.ImagePickerAsset, caption?: string) => {
     setIsUploading(true);
     try {
-      // Pada Android APK (compiled), fetch(asset.uri).blob() sering gagal (Network Request Failed).
-      // Pendekatan yang lebih stabil adalah membaca file sebagai Base64 dengan expo-file-system, 
-      // lalu men-decode-nya ke ArrayBuffer untuk di-upload ke Supabase Storage.
       const base64 = await FileSystem.readAsStringAsync(asset.uri, {
         encoding: 'base64',
       });
 
-      // Estimasi ukuran file dari base64 (approx: panjang string * 3/4)
       const approxSize = Math.round(base64.length * 3 / 4);
       if (approxSize > MAX_FILE_SIZE_BYTES) {
         throw new Error(`File too large (${(approxSize / 1024 / 1024).toFixed(1)}MB). Max 15MB.`);
@@ -259,7 +282,6 @@ export default function App() {
         .single();
         
       if (insertError || !data) {
-        // Rollback: Hapus file yang terlanjur di-upload ke Storage jika insert DB gagal
         try {
           await supabase.storage.from('toss_files').remove([fileName]);
         } catch (rollbackErr) {
@@ -305,24 +327,28 @@ export default function App() {
 
   // ============ DELETE ============
   const handleDeleteNote = async (note: TossNote) => {
-    if (note.localId) {
-      pendingAssetsRef.current.delete(note.localId);
-    }
-
-    // Hapus dari layar dulu (optimistic), baru hapus dari server
-    setNotes((prev) => prev.filter((n) => (n.localId || n.id) !== (note.localId || note.id)));
-
-    // Kalau note ini belum pernah sukses ter-insert ke DB (masih 'sending'/'error'),
-    // tidak ada row untuk dihapus di server
-    if (note.status !== 'sent') return;
-
-    const { error } = await supabase.from('toss_notes').delete().eq('id', note.id);
-    if (error) {
-      console.error('Failed to delete note:', error);
-      Alert.alert('Failed', 'Failed to delete message, please try again.');
-      setNotes((prev) =>
-        [...prev, note].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      );
+    if (note.status === 'sending' || note.status === 'deleting') return;
+    
+    // Animasikan status 'deleting'
+    LayoutAnimation.configureNext(CustomLayoutAnimation);
+    setNotes((prev) => prev.map((n) => (n.localId || n.id) === (note.localId || note.id) ? { ...n, status: 'deleting' } : n));
+    
+    try {
+      const { error } = await supabase.from('toss_notes').delete().eq('id', note.id);
+      
+      // Kasih jeda sedikit agar loading animation delete terlihat
+      await new Promise(r => setTimeout(r, 400));
+      
+      if (!error) {
+        LayoutAnimation.configureNext(CustomLayoutAnimation);
+        setNotes((prev) => prev.filter((n) => (n.localId || n.id) !== (note.localId || note.id)));
+      } else {
+        LayoutAnimation.configureNext(CustomLayoutAnimation);
+        setNotes((prev) => prev.map((n) => (n.localId || n.id) === (note.localId || note.id) ? { ...n, status: 'sent', errorMessage: 'Gagal dihapus' } : n));
+      }
+    } catch (err) {
+      LayoutAnimation.configureNext(CustomLayoutAnimation);
+      setNotes((prev) => prev.map((n) => (n.localId || n.id) === (note.localId || note.id) ? { ...n, status: 'sent', errorMessage: 'Gagal dihapus' } : n));
     }
   };
 
@@ -401,78 +427,90 @@ export default function App() {
       return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
     });
 
-  const renderItem = ({ item }: { item: TossNote }) => (
-    <Pressable
-      style={[styles.card, item.status === 'error' && styles.cardError]}
-    >
-      {/* RENDER CONTENT BERDASARKAN STATUS & TIPE */}
-      {item.status === 'sending' && item.type === 'file' ? (
-        <View style={styles.uploadPlaceholder}>
-          <ActivityIndicator color="#94a3b8" size="small" />
-          <Text style={styles.uploadPlaceholderText}>Uploading photo...</Text>
-        </View>
-      ) : item.type === 'file' && item.content ? (
-        <View>
-          {isImageFile(item.content) ? (
-            <Image source={{ uri: item.content }} style={styles.cardImage} resizeMode="cover" />
-          ) : (
-            <TouchableOpacity style={[styles.fileLinkButton, { flexDirection: 'row', alignItems: 'center', gap: 6 }]} onPress={() => Linking.openURL(item.content)}>
-              <Feather name="download-cloud" size={16} color="#3b82f6" />
-              <Text style={styles.fileLinkText}>Download: {getFileNameFromUrl(item.content)}</Text>
-            </TouchableOpacity>
-          )}
-          {item.caption && (
-            <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8 }}>
-              <Text style={{ color: '#f1f5f9', fontSize: 14 }}>{item.caption}</Text>
-            </View>
-          )}
-        </View>
-      ) : (
-        <Text style={styles.cardContent}>{item.content}</Text>
-      )}
+  const renderItem = ({ item }: { item: TossNote }) => {
+    const isSending = item.status === 'sending';
+    const isDeleting = item.status === 'deleting';
+    const opacity = isSending || isDeleting ? 0.6 : 1;
 
-      <View style={styles.cardFooter}>
-        {item.status === 'error' ? (
-          <>
-            <Text style={styles.cardErrorText}>{item.errorMessage || 'Failed to send'}</Text>
-            <TouchableOpacity
-              style={styles.btnRetry}
-              onPress={() => (item.type === 'text' ? retryTextNote(item) : retryImageUpload(item))}
-            >
-              <Text style={styles.btnRetryText}>Retry</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <>
-            <Text style={styles.cardTime}>
-              {item.status === 'sending' ? 'Sending...' : formatTime(item.created_at)}
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {item.status !== 'sending' && (
-                <TouchableOpacity
-                  style={[styles.btnCopy, { borderColor: 'rgba(248,113,113,0.3)' }]}
-                  onPress={() => setShowDeleteModal(item)}
-                >
-                  <Feather name="trash-2" size={14} color="#f87171" />
+    return (
+      <Pressable style={[{ opacity }]}>
+        <View style={[styles.card, item.status === 'error' && styles.cardError, (isSending || isDeleting) && { borderColor: '#3b82f6', borderWidth: 1 }]}>
+          {(isSending || isDeleting) && (
+            <View style={{ position: 'absolute', top: 12, right: 12, zIndex: 10 }}>
+              <ActivityIndicator color="#3b82f6" size="small" />
+            </View>
+          )}
+
+          {/* RENDER CONTENT BERDASARKAN STATUS & TIPE */}
+          {item.status === 'sending' && item.type === 'file' ? (
+            <View style={styles.uploadPlaceholder}>
+              <ActivityIndicator color="#94a3b8" size="small" />
+              <Text style={styles.uploadPlaceholderText}>Uploading photo...</Text>
+            </View>
+          ) : item.type === 'file' && item.content ? (
+            <View>
+              {isImageFile(item.content) ? (
+                <Image source={{ uri: item.content }} style={styles.cardImage} resizeMode="cover" />
+              ) : (
+                <TouchableOpacity style={[styles.fileLinkButton, { flexDirection: 'row', alignItems: 'center', gap: 6 }]} onPress={() => Linking.openURL(item.content)}>
+                  <Feather name="download-cloud" size={16} color="#3b82f6" />
+                  <Text style={styles.fileLinkText}>Download: {getFileNameFromUrl(item.content)}</Text>
                 </TouchableOpacity>
               )}
-              {item.status !== 'sending' && (
-                <TouchableOpacity
-                  style={[styles.btnCopy, copiedId === item.id && styles.btnCopied]}
-                  onPress={() => handleCopy(item.id, item.content)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.copyText, copiedId === item.id && styles.copiedText]}>
-                    {copiedId === item.id ? 'Copied' : 'Copy'}
-                  </Text>
-                </TouchableOpacity>
+              {item.caption && (
+                <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8 }}>
+                  <Text style={{ color: '#f1f5f9', fontSize: 14 }}>{item.caption}</Text>
+                </View>
               )}
             </View>
-          </>
-        )}
-      </View>
-    </Pressable>
-  );
+          ) : (
+            <Text style={styles.cardContent}>{item.content}</Text>
+          )}
+
+          <View style={styles.cardFooter}>
+            {item.status === 'error' ? (
+              <>
+                <Text style={styles.cardErrorText}>{item.errorMessage || 'Failed to send'}</Text>
+                <TouchableOpacity
+                  style={styles.btnRetry}
+                  onPress={() => (item.type === 'text' ? retryTextNote(item) : retryImageUpload(item))}
+                >
+                  <Text style={styles.btnRetryText}>Retry</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.cardTime}>
+                  {item.status === 'sending' ? 'Sending...' : isDeleting ? 'Deleting...' : formatTime(item.created_at)}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {item.type === 'text' && (
+                    <TouchableOpacity
+                      style={[styles.btnCopy, copiedId === item.id && styles.btnCopied]}
+                      onPress={() => handleCopy(item.id, item.content)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.copyText, copiedId === item.id && styles.copiedText]}>
+                        {copiedId === item.id ? 'Copied' : 'Copy'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {/* Delete Button (Mobile) */}
+                  <TouchableOpacity
+                    style={[styles.btnCopy, { borderColor: '#f87171' }]}
+                    onPress={() => handleDeleteNote(item)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.copyText, { color: '#f87171' }]}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>

@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import { enable, isEnabled, disable } from '@tauri-apps/plugin-autostart';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
-import { Power, Trash2, Copy, CheckCheck, Paperclip, Inbox, DownloadCloud, Search, ArrowUp, ArrowDown, FileQuestion, RefreshCw } from 'lucide-react';
+import { Power, Trash2, Copy, CheckCheck, Paperclip, Inbox, DownloadCloud, Search, ArrowUp, ArrowDown, FileQuestion, RefreshCw, Loader2 } from 'lucide-react';
 import './App.css';
 
 // Batas maksimal ukuran file yang boleh diupload
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
 
-type NoteStatus = 'sending' | 'sent' | 'error';
+type NoteStatus = 'sending' | 'sent' | 'error' | 'deleting';
 
 interface TossNote {
   id: string;
@@ -326,24 +326,47 @@ function App() {
 
   // ============ DELETE ============
   const handleDeleteNote = async (note: TossNote) => {
-    if (note.localId) {
-      pendingFilesRef.current.delete(note.localId);
-    }
+    if (note.status === 'sending' || note.status === 'deleting') return;
 
-    // Hapus dari layar dulu (optimistic), baru hapus dari server
-    setNotes((prev) => prev.filter((n) => (n.localId || n.id) !== (note.localId || note.id)));
+    setShowDeleteModal(null);
 
-    // Kalau note ini belum pernah sukses ter-insert ke DB (masih 'sending'/'error'),
-    // tidak ada row untuk dihapus di server
-    if (note.status !== 'sent') return;
+    // Ubah status jadi 'deleting' untuk memicu animasi Glitch-Dissolve
+    setNotes((prev) =>
+      prev.map((n) =>
+        (n.localId || n.id) === (note.localId || note.id)
+          ? { ...n, status: 'deleting' }
+          : n
+      )
+    );
 
-    const { error } = await supabase.from('toss_notes').delete().eq('id', note.id);
-    if (error) {
-      console.error('Failed to delete note:', error);
-      alert('Failed to delete message, please try again.');
-      // Kembalikan ke state kalau delete di server gagal
+    try {
+      const { error } = await supabase.from('toss_notes').delete().eq('id', note.id);
+      
+      // Tunggu sebentar agar animasi glitch sempat terlihat (misal 400ms)
+      await new Promise(resolve => setTimeout(resolve, 400));
+      
+      if (error) {
+        console.error('Error delete:', error);
+        // Kembalikan ke normal jika gagal
+        setNotes((prev) =>
+          prev.map((n) =>
+            (n.localId || n.id) === (note.localId || note.id)
+              ? { ...n, status: 'sent', errorMessage: 'Gagal menghapus' }
+              : n
+          )
+        );
+      } else {
+        // Hapus dari UI
+        setNotes((prev) => prev.filter((n) => (n.localId || n.id) !== (note.localId || note.id)));
+      }
+    } catch (err) {
+      console.error('Catch delete error:', err);
       setNotes((prev) =>
-        [...prev, note].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+        prev.map((n) =>
+          (n.localId || n.id) === (note.localId || note.id)
+            ? { ...n, status: 'sent', errorMessage: 'Gagal menghapus' }
+            : n
+        )
       );
     }
   };
@@ -512,8 +535,16 @@ function App() {
           filteredNotes.map((note) => (
             <div
               key={note.localId || note.id}
-              className={`toss-card ${note.status === 'error' ? 'toss-card-error' : ''}`}
+              className={`toss-card ${note.status === 'error' ? 'toss-card-error' : ''} ${note.status === 'sending' ? 'toss-card-sending' : ''} ${note.status === 'deleting' ? 'toss-card-deleting' : ''}`}
+              style={{ opacity: note.status === 'sending' ? 0.7 : 1 }}
             >
+              {/* Tampilkan spinner mini jika sedang loading (sending/deleting) */}
+              {(note.status === 'sending' || note.status === 'deleting') && (
+                <div style={{ position: 'absolute', top: '16px', right: '16px', color: 'var(--accent)' }}>
+                  <Loader2 size={16} className="lucide-spin" />
+                </div>
+              )}
+              
               {/* RENDER CONTENT BERDASARKAN STATUS & TIPE */}
               {note.status === 'sending' && note.type === 'file' ? (
                 <div className="upload-placeholder">Uploading file...</div>
