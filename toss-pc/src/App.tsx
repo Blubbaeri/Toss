@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import { enable, isEnabled, disable } from '@tauri-apps/plugin-autostart';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
-import { Power, Trash2, Copy, CheckCheck, Paperclip, Inbox, DownloadCloud, Search, ArrowUp, ArrowDown, FileQuestion } from 'lucide-react';
+import { Power, Trash2, Copy, CheckCheck, Paperclip, Inbox, DownloadCloud, Search, ArrowUp, ArrowDown, FileQuestion, RefreshCw } from 'lucide-react';
 import './App.css';
 
 // Batas maksimal ukuran file yang boleh diupload
@@ -484,6 +484,13 @@ function App() {
           title="Sort messages"
         >
           {sortOrder === 'asc' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}
+        </button>
+        <button 
+          onClick={fetchInitialNotes}
+          style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+          title="Refresh messages"
+        >
+          <RefreshCw size={14} />
         </button>
       </div>
 

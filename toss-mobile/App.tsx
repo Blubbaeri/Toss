@@ -22,7 +22,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './src/lib/supabase';
 
@@ -497,6 +497,9 @@ export default function App() {
           </View>
           <TouchableOpacity style={styles.sortButton} onPress={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}>
             <Feather name={sortOrder === 'asc' ? 'arrow-down' : 'arrow-up'} size={16} color="#f1f5f9" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.sortButton} onPress={fetchInitialNotes}>
+            <Feather name="refresh-cw" size={16} color="#60a5fa" />
           </TouchableOpacity>
         </View>
 
